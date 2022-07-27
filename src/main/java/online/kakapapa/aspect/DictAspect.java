@@ -4,26 +4,25 @@ import online.kakapapa.annotation.Dict;
 import online.kakapapa.annotation.EnableDict;
 import online.kakapapa.annotation.WrapperField;
 import online.kakapapa.customize.CustomizeConfig;
+import online.kakapapa.vo.ComResVo;
 import online.kakapapa.vo.PaginateVO;
-import online.kakapapa.vo.Ret;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.reflect.FieldUtils;
+import org.apache.commons.lang3.time.StopWatch;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.annotation.AfterReturning;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.util.CollectionUtils;
-import org.springframework.util.StopWatch;
 
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author Tien.Chang
@@ -38,15 +37,13 @@ public class DictAspect {
     private final CustomizeConfig customizeConfig;
     Logger log = LoggerFactory.getLogger(DictAspect.class);
 
-    @Autowired
     public DictAspect(CustomizeConfig customizeConfig) {
         this.customizeConfig = customizeConfig;
     }
 
-    @AfterReturning(pointcut = "@annotation(com.kakapapa.translator.annotation.EnableDict)", returning = "returnValue")
+    @AfterReturning(pointcut = "@annotation(online.kakapapa.annotation.EnableDict)", returning = "returnValue")
     public void doAfterReturning(JoinPoint point, Object returnValue) {
-        StopWatch stopWatch = new StopWatch("dictAspect");
-        stopWatch.start("translate-the-return");
+        StopWatch stopWatch = StopWatch.createStarted();
         EnableDict annotation = ((MethodSignature) point.getSignature()).getMethod().getAnnotation(EnableDict.class);
         if (Objects.isNull(annotation)) {
             return;
@@ -54,13 +51,13 @@ public class DictAspect {
         if (Objects.isNull(returnValue)) {
             return;
         }
-        if (!(returnValue instanceof Ret)) {
+        if (!(returnValue instanceof ComResVo)) {
             return;
         }
         Class<?> returnBean = annotation.bean();
         String returnName = annotation.value();
-        Ret r = (Ret) returnValue;
-        Object returnObj = r.get(returnName);
+        ComResVo comResVo = (ComResVo) returnValue;
+        Object returnObj = comResVo.get(returnName);
         if (Objects.isNull(returnObj)) {
             return;
         }
@@ -72,18 +69,18 @@ public class DictAspect {
         } else if (returnObj instanceof List) {
             List<?> retList = (List<?>) returnObj;
             List<Map<String, Object>> result = this.translateListObj(retList, returnBean);
-            r.put(returnName, result);
+            comResVo.put(returnName, result);
         } else if (Objects.equals(returnObj.getClass().getName(), returnBean.getName())) {
             Map<String, Object> result = this.translateObj(returnObj);
-            r.put(returnName, result);
+            comResVo.put(returnName, result);
         }
         stopWatch.stop();
-        log.info(stopWatch.prettyPrint());
+        log.info("Translating the response cost {} ms", stopWatch.getTime(TimeUnit.MILLISECONDS));
     }
 
     private List<Map<String, Object>> translateListObj(List<?> retList, Class<?> returnBean) {
         List<Map<String, Object>> result = new ArrayList<>();
-        if (CollectionUtils.isEmpty(retList)) {
+        if (Objects.isNull(retList) || retList.size() == 0) {
             return result;
         }
         retList.forEach(item -> {
@@ -101,7 +98,7 @@ public class DictAspect {
         String classCacheKey = String.join("-", CLASS_CACHE_PREFIX, objClassName);
         // 缓存obj类的字段
         List<Field> fields = customizeConfig.getDictCache().getClassFieldCache().get(classCacheKey);
-        if (CollectionUtils.isEmpty(fields)) {
+        if (Objects.isNull(fields) || fields.size() == 0) {
             fields = FieldUtils.getAllFieldsList(obj.getClass());
             customizeConfig.getDictCache().getClassFieldCache().put(classCacheKey, fields);
         }
@@ -126,7 +123,7 @@ public class DictAspect {
                 if (Objects.nonNull(wrapperField)) {
                     if (fieldValue instanceof Collection) {
                         List<?> fieldList = (List<?>) fieldValue;
-                        if (CollectionUtils.isEmpty(fieldList)) {
+                        if (fieldList.size() == 0) {
                             result.put(fieldName, new ArrayList<>());
                         } else {
                             result.put(fieldName, translateListObj(fieldList, ((List<?>) fieldValue).get(0).getClass()));
